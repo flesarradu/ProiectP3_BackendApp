@@ -1,12 +1,16 @@
 ﻿#nullable disable
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using ProiectP3_BackendApp.Models;
+using Newtonsoft.Json;
+using ProiectP3_BackendApp.Trees;
 
 namespace ProiectP3_BackendApp.Controllers
 {
@@ -16,9 +20,12 @@ namespace ProiectP3_BackendApp.Controllers
     {
         private readonly UserContext _context;
 
+        private BTree<User,User> usersTree;
+
         public UsersController(UserContext context)
         {
             _context = context;
+            usersTree = new BTree<User,User>(2);
         }
 
         // GET: api/Users
@@ -28,18 +35,39 @@ namespace ProiectP3_BackendApp.Controllers
             return await _context.Users.ToListAsync();
         }
 
-        // GET: api/Users/5
+        // GET: api/Users/user
         [HttpGet("{user}")]
-        public async Task<ActionResult<User>> GetUser(string u)
+        public async Task<ActionResult<User>> GetUser(string user)
         {
             //var user = await _context.Users.FindAsync(id);
-            var user = new User { Id = 1, UserName = "alexandru", Password = "passwd" };
-            if (user == null)
+
+            await FetchUsersAsync();
+
+            var User = await _context.Users.Where(x=>x.UserName==user).FirstAsync();
+
+            if (User == null)
             {
                 return NotFound();
             }
 
-            return user;
+            return usersTree.Search(User).Key;
+        }
+
+        private async Task FetchUsersAsync()
+        {
+            string fileName = $"{System.IO.Directory.GetCurrentDirectory()}\\json\\users.json";
+            string jsonString = System.IO.File.ReadAllText(fileName).ToString();
+            var x = System.Text.Json.JsonSerializer.Deserialize<User[]>(jsonString);
+
+            foreach (var user in x)
+            {
+                if(user != null && !_context.Users.Contains(user))
+                {
+                    usersTree.Insert(user);
+                    _context.Users.Add(user);
+                }
+            }
+            await _context.SaveChangesAsync();
         }
 
         // PUT: api/Users/5
@@ -78,8 +106,20 @@ namespace ProiectP3_BackendApp.Controllers
         [HttpPost]
         public async Task<ActionResult<User>> PostUser(User user)
         {
+            //Save in json file
+
             _context.Users.Add(user);
+
+            usersTree.Insert(user);
+
             await _context.SaveChangesAsync();
+
+            string jsonString = JsonConvert.SerializeObject(_context.Users.ToArray());
+            if (jsonString != "")
+            {
+                string fileName = $"{System.IO.Directory.GetCurrentDirectory()}\\json\\users.json";
+                System.IO.File.WriteAllText(fileName, jsonString);
+            }
 
             return CreatedAtAction("GetUser", new { id = user.Id }, user);
         }
@@ -94,6 +134,8 @@ namespace ProiectP3_BackendApp.Controllers
                 return NotFound();
             }
 
+            usersTree.Delete(user);
+
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
 
@@ -104,5 +146,6 @@ namespace ProiectP3_BackendApp.Controllers
         {
             return _context.Users.Any(e => e.Id == id);
         }
+
     }
 }
